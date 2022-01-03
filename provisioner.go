@@ -217,12 +217,7 @@ func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v
 	fs := v1.PersistentVolumeFilesystem
 	hostPathType := v1.HostPathDirectoryOrCreate
 
-	valueNode, ok := node.GetLabels()[KeyNode]
-	if !ok {
-		valueNode = node.Name
-	}
-
-	return &v1.PersistentVolume{
+	pv := v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
@@ -239,25 +234,41 @@ func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v
 					Type: &hostPathType,
 				},
 			},
-			NodeAffinity: &v1.VolumeNodeAffinity{
-				Required: &v1.NodeSelector{
-					NodeSelectorTerms: []v1.NodeSelectorTerm{
+		},
+	}
+
+	// If our `no_affinity` parameter is not set or not true, move on with normal node affinity
+	if binding, ok := opts.StorageClass.Parameters["no_affinity"]; ok {
+		if binding == "true" {
+			logrus.Infof("Volume %v created with no affinity", name)
+			return &pv, nil
+		}
+	}
+
+	valueNode, ok := node.GetLabels()[KeyNode]
+	if !ok {
+		valueNode = node.Name
+	}
+
+	pv.Spec.NodeAffinity = &v1.VolumeNodeAffinity{
+		Required: &v1.NodeSelector{
+			NodeSelectorTerms: []v1.NodeSelectorTerm{
+				{
+					MatchExpressions: []v1.NodeSelectorRequirement{
 						{
-							MatchExpressions: []v1.NodeSelectorRequirement{
-								{
-									Key:      KeyNode,
-									Operator: v1.NodeSelectorOpIn,
-									Values: []string{
-										valueNode,
-									},
-								},
+							Key:      KeyNode,
+							Operator: v1.NodeSelectorOpIn,
+							Values: []string{
+								valueNode,
 							},
 						},
 					},
 				},
 			},
 		},
-	}, nil
+	}
+
+	return &pv, nil
 }
 
 func (p *LocalPathProvisioner) Delete(pv *v1.PersistentVolume) (err error) {
